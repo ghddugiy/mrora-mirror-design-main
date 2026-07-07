@@ -7,6 +7,7 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { deleteUpload, readContent, validateContent, writeContent, writeUpload } from "./lib/content-store";
 import { DEFAULT_SITE_CONTENT } from "./lib/site-content-data";
+import nodemailer from "nodemailer";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -52,8 +53,6 @@ async function handleApi(request: Request): Promise<Response | undefined> {
   const url = new URL(request.url);
   
   if (url.pathname === "/api/contact" && request.method === "POST") {
-    const content = await readContent();
-    const emailTo = content?.contact?.email || "mroraai11@gmail.com";
     const body = await request.json().catch(() => null) as {
       name?: string;
       phone?: string;
@@ -62,94 +61,95 @@ async function handleApi(request: Request): Promise<Response | undefined> {
       message?: string;
     } | null;
 
+    // Validate required fields
     if (!body?.name || !body?.email || !body?.message || !body?.service) {
-      return json({ ok: false, error: "Missing required fields" }, { status: 400, headers: corsCredentialsHeaders(request) });
+      return json({ ok: false, error: "Missing required fields (name, email, service, and message are required)" }, { status: 400, headers: corsCredentialsHeaders(request) });
     }
 
-    let sent = false;
+    // SMTP configuration from environment variables
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
 
-    // Check if RESEND_API_KEY is available
-    if (process.env.RESEND_API_KEY) {
-      try {
-        const response = await fetch("https://api.resend.com/emails", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${process.env.RESEND_API_KEY}`
-          },
-          body: JSON.stringify({
-            from: "Mrora Contact Form <onboarding@resend.dev>",
-            to: emailTo,
-            subject: `Project Inquiry from ${body.name}`,
-            html: `<p><strong>Name:</strong> ${body.name}</p>
-                   <p><strong>Phone:</strong> ${body.phone || 'N/A'}</p>
-                   <p><strong>Email:</strong> ${body.email}</p>
-                   <p><strong>Service Needed:</strong> ${body.service}</p>
-                   <p><strong>Project Details:</strong><br/>${body.message.replace(/\n/g, '<br/>')}</p>`
-          })
-        });
-        if (response.ok) {
-          sent = true;
-        } else {
-          const errText = await response.text();
-          console.error("Resend send failed:", errText);
-        }
-      } catch (e) {
-        console.error("Resend send error:", e);
-      }
+    if (!smtpHost || !smtpUser || !smtpPass) {
+      console.error("Missing SMTP credentials in environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS must be configured).");
+      return json(
+        { ok: false, error: "Email service is currently misconfigured on the server. Please set up the SMTP environment variables." },
+        { status: 500, headers: corsCredentialsHeaders(request) }
+      );
     }
 
-    // Fallback to FormSubmit.co proxy
-    if (!sent) {
-      try {
-        const formSubmitHeaders: Record<string, string> = {
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        };
-        const referer = request.headers.get("referer");
-        if (referer) {
-          formSubmitHeaders["Referer"] = referer;
-        }
-        const origin = request.headers.get("origin");
-        if (origin) {
-          formSubmitHeaders["Origin"] = origin;
-        }
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465, // true for 465, false for 587 or others
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
 
-        const response = await fetch(`https://formsubmit.co/ajax/${emailTo}`, {
-          method: "POST",
-          headers: formSubmitHeaders,
-          body: JSON.stringify({
-            _subject: `Project Inquiry from ${body.name}`,
-            _replyto: body.email,
-            Name: body.name,
-            Phone: body.phone || "N/A",
-            Email: body.email,
-            Service: body.service,
-            Message: body.message
-          })
-        });
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success === "true" || result.success === true) {
-            sent = true;
-          } else if (result.message && (result.message.includes("Activation") || result.message.includes("Activate"))) {
-            return json({ ok: true, activationRequired: true }, { headers: corsCredentialsHeaders(request) });
-          } else {
-            console.error("FormSubmit send failed:", result);
-          }
-        } else {
-          const errText = await response.text();
-          console.error("FormSubmit send failed with HTTP status:", response.status, errText);
-        }
-      } catch (e) {
-        console.error("FormSubmit send error:", e);
-      }
-    }
+      const mailOptions = {
+        from: `"${body.name} (via Website)" <${smtpUser}>`, // SMTP mail servers usually require the "from" address to be the authenticated user
+        replyTo: body.email, // Allows replying directly to the inquirer's email
+        to: "mroraaii1@gmail.com", // Recipient as specified in instructions
+        subject: `Mrora Inquiry: ${body.service} from ${body.name}`,
+        text: `New Project Inquiry from Mrora Website\n\n` +
+              `Name: ${body.name}\n` +
+              `Email: ${body.email}\n` +
+              `Phone: ${body.phone || "N/A"}\n` +
+              `Service: ${body.service}\n\n` +
+              `Message:\n${body.message}`,
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; background-color: #0c0c0c; color: #ffffff; border: 1px solid #1a1a1a; border-radius: 16px;">
+            <h2 style="color: #c6ff3d; font-size: 24px; margin-top: 0; margin-bottom: 20px; font-weight: 800; text-transform: uppercase; border-bottom: 1px solid #222222; padding-bottom: 15px;">
+              New Project Inquiry
+            </h2>
+            
+            <div style="background-color: #121212; padding: 20px; border-radius: 12px; border: 1px solid #222222; margin-bottom: 25px;">
+              <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                  <td style="padding: 8px 0; font-size: 14px; color: #888888; width: 30%;">Full Name</td>
+                  <td style="padding: 8px 0; font-size: 14px; color: #ffffff; font-weight: bold;">${body.name}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; font-size: 14px; color: #888888;">Email Address</td>
+                  <td style="padding: 8px 0; font-size: 14px; color: #c6ff3d; font-weight: bold;"><a href="mailto:${body.email}" style="color: #c6ff3d; text-decoration: none;">${body.email}</a></td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; font-size: 14px; color: #888888;">Phone Number</td>
+                  <td style="padding: 8px 0; font-size: 14px; color: #ffffff;">${body.phone || "N/A"}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 8px 0; font-size: 14px; color: #888888;">Selected Service</td>
+                  <td style="padding: 8px 0; font-size: 14px; color: #ffffff;"><span style="background-color: #c6ff3d; color: #000000; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: bold;">${body.service}</span></td>
+                </tr>
+              </table>
+            </div>
 
-    if (sent) {
+            <div style="margin-bottom: 10px;">
+              <h3 style="color: #ffffff; font-size: 16px; margin-top: 0; margin-bottom: 10px; font-weight: 700;">Project details & message</h3>
+              <div style="background-color: #121212; padding: 20px; border-radius: 12px; border: 1px solid #222222; font-size: 14px; line-height: 1.6; color: #dddddd; white-space: pre-wrap;">${body.message}</div>
+            </div>
+
+            <p style="font-size: 11px; color: #555555; text-align: center; margin-top: 30px; border-top: 1px solid #222222; padding-top: 15px; margin-bottom: 0;">
+              This inquiry was securely delivered directly from your website contact form.
+            </p>
+          </div>
+        `
+      };
+
+      await transporter.sendMail(mailOptions);
       return json({ ok: true }, { headers: corsCredentialsHeaders(request) });
+    } catch (error: any) {
+      console.error("Nodemailer SMTP email dispatch failed:", error);
+      return json(
+        { ok: false, error: error?.message || "Failed to dispatch email via SMTP." },
+        { status: 500, headers: corsCredentialsHeaders(request) }
+      );
     }
-    return json({ ok: false, error: "Failed to send message via mail services." }, { status: 500, headers: corsCredentialsHeaders(request) });
   }
 
   if (url.pathname === "/api/content" && request.method === "GET") {

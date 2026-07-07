@@ -19,6 +19,7 @@ export function ContactDialog() {
   const [copied, setCopied] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recipient, setRecipient] = useState("");
 
   const services = [
     "Web Design & Development",
@@ -44,6 +45,7 @@ export function ContactDialog() {
 
       const data = await response.json().catch(() => null);
       if (response.ok && data?.ok) {
+        setRecipient(data.recipient || "mroraaii1@gmail.com");
         setSubmitted(true);
       } else {
         throw new Error(data?.error || "Failed to send inquiry.");
@@ -213,7 +215,7 @@ Details: ${formData.message}`;
             <div className="space-y-2">
               <h3 className="text-2xl font-bold text-white">Inquiry Sent!</h3>
               <p className="text-sm text-white/60 max-w-sm mx-auto">
-                We've sent your request to <span className="text-[color:var(--lime)] font-semibold">mroraaii1@gmail.com</span>.
+                We've sent your request to <span className="text-[color:var(--lime)] font-semibold">{recipient}</span>.
               </p>
               <p className="text-xs text-white/40 max-w-xs mx-auto">
                 Your request has been delivered. We will get back to you shortly.

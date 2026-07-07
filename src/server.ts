@@ -70,6 +70,7 @@ async function handleApi(request: Request): Promise<Response | undefined> {
 
     // Validate required fields
     if (!body?.name || !body?.email || !body?.message || !body?.service) {
+      console.error("[Validation Error] Missing fields in inquiry request body:", body);
       return json({ ok: false, error: "Missing required fields (name, email, service, and message are required)" }, { status: 400, headers: corsCredentialsHeaders(request) });
     }
 
@@ -78,7 +79,7 @@ async function handleApi(request: Request): Promise<Response | undefined> {
     const missingVars = requiredVars.filter((varName) => !process.env[varName]);
     if (missingVars.length > 0) {
       const errorMsg = `SMTP email service is misconfigured. Missing environment variables: ${missingVars.join(", ")}`;
-      console.error(errorMsg);
+      console.error(`[Configuration Error] ${errorMsg}`);
       return json(
         { ok: false, error: errorMsg },
         { status: 500, headers: corsCredentialsHeaders(request) }
@@ -91,6 +92,9 @@ async function handleApi(request: Request): Promise<Response | undefined> {
     const smtpUser = process.env.SMTP_USER!;
     const smtpPass = process.env.SMTP_PASS!;
     const contactEmail = process.env.CONTACT_EMAIL!;
+
+    console.log(`[SMTP Info] Attempting to initialize SMTP transporter for user: ${smtpUser} via host: ${smtpHost}:${smtpPort} (Secure: ${smtpSecure})`);
+    console.log(`[SMTP Info] Target email address (process.env.CONTACT_EMAIL): ${contactEmail}`);
 
     try {
       const transporter = nodemailer.createTransport({
@@ -106,9 +110,13 @@ async function handleApi(request: Request): Promise<Response | undefined> {
       // Test SMTP connection using transporter.verify()
       try {
         await transporter.verify();
+        console.log("[SMTP Info] SMTP connection verification succeeded!");
       } catch (verifyError: any) {
-        const verifyErrorMsg = `SMTP Connection Verification Failed: ${verifyError.message || verifyError}`;
-        console.error(verifyErrorMsg, verifyError);
+        let verifyErrorMsg = `SMTP Connection Verification Failed: ${verifyError.message || verifyError}`;
+        if (verifyError.code === 'EAUTH' || verifyError.message?.includes('Username and Password not accepted') || verifyError.responseCode === 535) {
+          verifyErrorMsg = `SMTP Authentication Failed: Please check your SMTP_USER (${smtpUser}) and SMTP_PASS (Google App Password) environment variables. Error details: ${verifyError.message}`;
+        }
+        console.error(`[SMTP Connection Error] ${verifyErrorMsg}`, verifyError);
         return json(
           { ok: false, error: verifyErrorMsg },
           { status: 500, headers: corsCredentialsHeaders(request) }
@@ -165,12 +173,28 @@ async function handleApi(request: Request): Promise<Response | undefined> {
         `
       };
 
+      console.log("Nodemailer sendMail() configuration:", {
+        from: mailOptions.from,
+        to: mailOptions.to,
+        replyTo: mailOptions.replyTo,
+        subject: mailOptions.subject,
+        textLength: mailOptions.text.length,
+        htmlLength: mailOptions.html.length,
+      });
+
       await transporter.sendMail(mailOptions);
-      return json({ ok: true }, { headers: corsCredentialsHeaders(request) });
+      console.log(`[SMTP Info] Email successfully sent to recipient: ${contactEmail}`);
+      return json({ ok: true, recipient: contactEmail }, { headers: corsCredentialsHeaders(request) });
     } catch (error: any) {
-      console.error("Nodemailer SMTP email dispatch failed:", error);
+      let dispatchErrorMsg = `Nodemailer SMTP Dispatch Failed: ${error?.message || error}`;
+      if (error.code === 'EENVELOPE' || error.message?.includes('recipient') || error.responseCode === 550) {
+        dispatchErrorMsg = `Invalid Recipient Email Address: The recipient address ${contactEmail} was rejected by the mail server. Please ensure CONTACT_EMAIL is a valid email. Error details: ${error.message}`;
+      } else if (error.code === 'EAUTH' || error.responseCode === 535) {
+        dispatchErrorMsg = `SMTP Authentication Failed: Please check your SMTP credentials. Error details: ${error.message}`;
+      }
+      console.error(`[SMTP Dispatch Error] ${dispatchErrorMsg}`, error);
       return json(
-        { ok: false, error: `Nodemailer SMTP Dispatch Failed: ${error?.message || error}` },
+        { ok: false, error: dispatchErrorMsg },
         { status: 500, headers: corsCredentialsHeaders(request) }
       );
     }

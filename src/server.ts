@@ -9,6 +9,13 @@ import { deleteUpload, readContent, validateContent, writeContent, writeUpload }
 import { DEFAULT_SITE_CONTENT } from "./lib/site-content-data";
 import nodemailer from "nodemailer";
 
+// Validate SMTP environment variables on startup
+const REQUIRED_SMTP_VARS = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "CONTACT_EMAIL"];
+const missingSmtpVarsOnStart = REQUIRED_SMTP_VARS.filter((varName) => !process.env[varName]);
+if (missingSmtpVarsOnStart.length > 0) {
+  console.error(`[SMTP CONFIGURATION WARNING] The following required environment variables are missing for contact form functionality: ${missingSmtpVarsOnStart.join(", ")}`);
+}
+
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
@@ -66,35 +73,52 @@ async function handleApi(request: Request): Promise<Response | undefined> {
       return json({ ok: false, error: "Missing required fields (name, email, service, and message are required)" }, { status: 400, headers: corsCredentialsHeaders(request) });
     }
 
-    // SMTP configuration from environment variables
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
-
-    if (!smtpHost || !smtpUser || !smtpPass) {
-      console.error("Missing SMTP credentials in environment variables (SMTP_HOST, SMTP_USER, SMTP_PASS must be configured).");
+    // Check environment variables at runtime to print missing ones specifically
+    const requiredVars = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "CONTACT_EMAIL"];
+    const missingVars = requiredVars.filter((varName) => !process.env[varName]);
+    if (missingVars.length > 0) {
+      const errorMsg = `SMTP email service is misconfigured. Missing environment variables: ${missingVars.join(", ")}`;
+      console.error(errorMsg);
       return json(
-        { ok: false, error: "Email service is currently misconfigured on the server. Please set up the SMTP environment variables." },
+        { ok: false, error: errorMsg },
         { status: 500, headers: corsCredentialsHeaders(request) }
       );
     }
+
+    const smtpHost = process.env.SMTP_HOST!;
+    const smtpPort = parseInt(process.env.SMTP_PORT!, 10);
+    const smtpSecure = process.env.SMTP_SECURE === "true"; // true for port 465, false for port 587
+    const smtpUser = process.env.SMTP_USER!;
+    const smtpPass = process.env.SMTP_PASS!;
+    const contactEmail = process.env.CONTACT_EMAIL!;
 
     try {
       const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
-        secure: smtpPort === 465, // true for 465, false for 587 or others
+        secure: smtpSecure,
         auth: {
           user: smtpUser,
           pass: smtpPass,
         },
       });
 
+      // Test SMTP connection using transporter.verify()
+      try {
+        await transporter.verify();
+      } catch (verifyError: any) {
+        const verifyErrorMsg = `SMTP Connection Verification Failed: ${verifyError.message || verifyError}`;
+        console.error(verifyErrorMsg, verifyError);
+        return json(
+          { ok: false, error: verifyErrorMsg },
+          { status: 500, headers: corsCredentialsHeaders(request) }
+        );
+      }
+
       const mailOptions = {
         from: `"${body.name} (via Website)" <${smtpUser}>`, // SMTP mail servers usually require the "from" address to be the authenticated user
         replyTo: body.email, // Allows replying directly to the inquirer's email
-        to: "mroraaii1@gmail.com", // Recipient as specified in instructions
+        to: contactEmail, // Recipient as specified in environment variables
         subject: `Mrora Inquiry: ${body.service} from ${body.name}`,
         text: `New Project Inquiry from Mrora Website\n\n` +
               `Name: ${body.name}\n` +
@@ -146,7 +170,7 @@ async function handleApi(request: Request): Promise<Response | undefined> {
     } catch (error: any) {
       console.error("Nodemailer SMTP email dispatch failed:", error);
       return json(
-        { ok: false, error: error?.message || "Failed to dispatch email via SMTP." },
+        { ok: false, error: `Nodemailer SMTP Dispatch Failed: ${error?.message || error}` },
         { status: 500, headers: corsCredentialsHeaders(request) }
       );
     }

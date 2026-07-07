@@ -17,6 +17,9 @@ export function ContactDialog() {
   });
   const [submitted, setSubmitted] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [activationRequired, setActivationRequired] = useState(false);
 
   const services = [
     "Web Design & Development",
@@ -26,23 +29,80 @@ export function ContactDialog() {
     "Other",
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSending(true);
+    setError(null);
 
-    const subject = `Project Inquiry from ${formData.name}`;
-    const body = `Name: ${formData.name}
-Phone: ${formData.phone}
-Email: ${formData.email}
-Service Needed: ${formData.service}
+    let sent = false;
 
-Project Details:
-${formData.message}`;
+    // 1. Try backend API first (cleaner, supports RESEND_API_KEY environment variable)
+    try {
+      const response = await fetch("/api/contact", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formData),
+      });
 
-    const emailTo = content?.contact?.email || "mroraai11@gmail.com";
-    const mailtoUrl = `mailto:${emailTo}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    
-    window.location.href = mailtoUrl;
-    setSubmitted(true);
+      const data = await response.json().catch(() => null);
+      if (response.ok && data?.ok) {
+        sent = true;
+        if (data?.activationRequired) {
+          setActivationRequired(true);
+        }
+      } else {
+        console.warn("Backend send failed, trying direct browser fallback...", data?.error);
+      }
+    } catch (err) {
+      console.warn("Backend request error, trying direct browser fallback...", err);
+    }
+
+    // 2. Client-side browser fallback (failsafe, browser injects correct Origin/Referer headers)
+    if (!sent) {
+      try {
+        const emailTo = content?.contact?.email || "mroraai11@gmail.com";
+        const response = await fetch(`https://formsubmit.co/ajax/${emailTo}`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({
+            _subject: `Project Inquiry from ${formData.name}`,
+            _replyto: formData.email,
+            Name: formData.name,
+            Phone: formData.phone || "N/A",
+            Email: formData.email,
+            Service: formData.service,
+            Message: formData.message
+          }),
+        });
+
+        const data = await response.json().catch(() => null);
+        if (response.ok) {
+          if (data?.success === "true" || data?.success === true) {
+            sent = true;
+          } else if (data?.message && (data.message.includes("Activation") || data.message.includes("Activate"))) {
+            setActivationRequired(true);
+            sent = true;
+          } else {
+            throw new Error(data?.message || "Failed to send request.");
+          }
+        } else {
+          throw new Error(data?.message || "Failed to send request.");
+        }
+      } catch (err: any) {
+        console.error("Direct browser contact form error:", err);
+        setError(err?.message || "There was a problem sending your inquiry. Please try again or copy details to send manually.");
+      }
+    }
+
+    if (sent) {
+      setSubmitted(true);
+    }
+    setSending(false);
   };
 
   const getFormattedMessage = () => {
@@ -63,6 +123,8 @@ Details: ${formData.message}`;
     setContactOpen(false);
     setTimeout(() => {
       setSubmitted(false);
+      setError(null);
+      setActivationRequired(false);
       setFormData({
         name: "",
         phone: "",
@@ -89,6 +151,12 @@ Details: ${formData.message}`;
                 Share your details with us and we'll help build something unforgettable.
               </DialogDescription>
             </DialogHeader>
+
+            {error && (
+              <div className="p-3 text-xs bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg">
+                {error}
+              </div>
+            )}
 
             <div className="space-y-4">
               <div className="space-y-2">
@@ -167,26 +235,68 @@ Details: ${formData.message}`;
             <div className="pt-2 flex justify-end">
               <button
                 type="submit"
-                disabled={!formData.service || !formData.name || !formData.phone || !formData.email}
-                className="w-full justify-center pill py-3 text-center disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex items-center gap-2"
+                disabled={sending || !formData.service || !formData.name || !formData.phone || !formData.email}
+                className="w-full justify-center pill py-3 text-center disabled:opacity-50 disabled:pointer-events-none cursor-pointer flex items-center justify-center gap-2"
               >
-                Send Request
-                <span aria-hidden>→</span>
+                {sending ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 text-black" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    Send Request
+                    <span aria-hidden>→</span>
+                  </>
+                )}
               </button>
             </div>
           </form>
         ) : (
           <div className="text-center py-8 space-y-6">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[color:var(--lime)]/10 text-[color:var(--lime)] border border-[color:var(--lime)]/20 animate-bounce">
-              <Check className="h-7 w-7" />
-            </div>
+            {activationRequired ? (
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 animate-pulse">
+                <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+            ) : (
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[color:var(--lime)]/10 text-[color:var(--lime)] border border-[color:var(--lime)]/20 animate-bounce">
+                <Check className="h-7 w-7" />
+              </div>
+            )}
             <div className="space-y-2">
-              <h3 className="text-2xl font-bold text-white">Inquiry Prepared!</h3>
+              <h3 className="text-2xl font-bold text-white">
+                {activationRequired ? "Activation Required!" : "Inquiry Sent!"}
+              </h3>
               <p className="text-sm text-white/60 max-w-sm mx-auto">
-                We've launched your email client to send this request to <span className="text-[color:var(--lime)] font-semibold">{content?.contact?.email || "mroraai11@gmail.com"}</span>.
+                {activationRequired ? (
+                  <>
+                    An activation email has been sent to{" "}
+                    <span className="text-[color:var(--lime)] font-semibold">
+                      {content?.contact?.email || "mroraai11@gmail.com"}
+                    </span>
+                    .
+                  </>
+                ) : (
+                  <>
+                    We've sent your request to{" "}
+                    <span className="text-[color:var(--lime)] font-semibold">
+                      {content?.contact?.email || "mroraai11@gmail.com"}
+                    </span>
+                    .
+                  </>
+                )}
               </p>
               <p className="text-xs text-white/40 max-w-xs mx-auto">
-                If the email app did not open, you can copy the details below and send it manually.
+                {activationRequired ? (
+                  "Please check your inbox (and spam folder) for an email from FormSubmit containing the 'Activate Form' link and click it to complete activation."
+                ) : (
+                  "Your request has been delivered. We will get back to you shortly."
+                )}
               </p>
             </div>
 

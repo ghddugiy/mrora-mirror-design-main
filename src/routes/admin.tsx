@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { DEFAULT_SITE_CONTENT, type SiteContent, siteContentSchema } from "@/lib/site-content";
 import { useSiteContent } from "@/lib/site-content-context";
 import { parseAdjustments, updateAdjustments } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin")({
-  component: AdminRoute,
+  component: AdminRouteShell,
 });
 
 type ErrorMap = Record<string, string>;
@@ -296,10 +296,95 @@ function ArrayEditor({
   );
 }
 
-function AdminRoute() {
-  const { content, setContent, resetContent, refreshContent } = useSiteContent();
-  const [authed, setAuthed] = useState(false);
+function AdminRouteShell() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.pathname === "/admin") {
+      void navigate({ to: "/admin/login", replace: true });
+    }
+  }, [location.pathname, navigate]);
+
+  return <Outlet />;
+}
+
+function useAdminPageClass() {
+  useEffect(() => {
+    document.body.classList.add("admin-page");
+    return () => document.body.classList.remove("admin-page");
+  }, []);
+}
+
+async function checkAdminSession() {
+  try {
+    const res = await fetch("/api/admin/session", { credentials: "include" });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return Boolean(data?.authed);
+  } catch {
+    return false;
+  }
+}
+
+export function AdminLogin() {
+  const navigate = useNavigate();
   const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [globalError, setGlobalError] = useState("");
+
+  useAdminPageClass();
+
+  useEffect(() => {
+    void checkAdminSession().then((authed) => {
+      if (authed) void navigate({ to: "/admin/dashboard", replace: true });
+    });
+  }, [navigate]);
+
+  return (
+    <main className="admin-page min-h-screen bg-black px-6 py-24 text-white">
+      <form
+        className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-8"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setBusy(true);
+          setGlobalError("");
+          try {
+            await requestJson("/api/admin/login", { password });
+            await navigate({ to: "/admin/dashboard", replace: true });
+          } catch {
+            setGlobalError("Invalid password");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <h1 className="text-3xl font-semibold">Admin Login</h1>
+        <p className="mt-2 text-sm text-white/60">Use the admin password to edit live site content.</p>
+        <Input
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          type="password"
+          className="mt-6"
+          placeholder="Admin password"
+          autoComplete="current-password"
+        />
+        <div className="mt-6 flex gap-3">
+          <button className="pill" disabled={busy} type="submit">
+            {busy ? "Signing In..." : "Sign In"}
+          </button>
+          <Link to="/" className="pill">Back Home</Link>
+        </div>
+        {globalError ? <p className="mt-3 text-sm text-red-400">{globalError}</p> : null}
+      </form>
+    </main>
+  );
+}
+
+export function AdminDashboard() {
+  const navigate = useNavigate();
+  const { content, setContent, resetContent, refreshContent } = useSiteContent();
+  const [sessionState, setSessionState] = useState<"checking" | "authed" | "guest">("checking");
   const [draft, setDraft] = useState<SiteContent>(cloneContent(content));
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -314,16 +399,22 @@ function AdminRoute() {
   }, [content]);
 
   useEffect(() => {
-    void fetch("/api/admin/session", { credentials: "include" })
-      .then((r) => r.json())
-      .then((data) => setAuthed(Boolean(data?.authed)))
-      .catch(() => setAuthed(false));
-  }, []);
+    let active = true;
+    void checkAdminSession().then((authed) => {
+      if (!active) return;
+      if (authed) {
+        setSessionState("authed");
+        return;
+      }
+      setSessionState("guest");
+      void navigate({ to: "/admin/login", replace: true });
+    });
+    return () => {
+      active = false;
+    };
+  }, [navigate]);
 
-  useEffect(() => {
-    document.body.classList.add("admin-page");
-    return () => document.body.classList.remove("admin-page");
-  }, []);
+  useAdminPageClass();
 
   const validation = useMemo(() => siteContentSchema.safeParse(draft), [draft]);
   const errors = useMemo(() => validation.success ? {} : buildErrorMap(validation.error.issues), [validation]);
@@ -339,51 +430,27 @@ function AdminRoute() {
   }
 
   async function deleteImage(url: string) {
-    if (!url.startsWith("/api/uploads/")) return;
-    const filename = decodeURIComponent(url.split("/").pop() ?? "");
+    const isManagedUpload = url.startsWith("/api/uploads/") || url.includes(".blob.vercel-storage.com/");
+    if (!isManagedUpload) return;
     await fetch("/api/admin/upload", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ filename }),
+      body: JSON.stringify({ url }),
       credentials: "include",
     });
   }
 
-  if (!authed) {
+  if (sessionState === "checking") {
     return (
-      <main className="admin-page min-h-screen bg-black px-6 py-24 text-white">
-        <div className="mx-auto max-w-md rounded-2xl border border-white/10 bg-white/5 p-8">
-          <h1 className="text-3xl font-semibold">Admin Login</h1>
-          <p className="mt-2 text-sm text-white/60">Use the admin password to edit live site content.</p>
-          <Input
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            type="password"
-            className="mt-6"
-            placeholder="Admin password"
-          />
-          <div className="mt-6 flex gap-3">
-            <button
-              className="pill"
-              onClick={async () => {
-                try {
-                  await requestJson("/api/admin/login", { password });
-                  setAuthed(true);
-                  setStatus("Signed in.");
-                } catch {
-                  setGlobalError("Invalid password");
-                }
-              }}
-            >
-              Sign In
-            </button>
-            <Link to="/" className="pill">Back Home</Link>
-          </div>
-          {globalError ? <p className="mt-3 text-sm text-red-400">{globalError}</p> : null}
+      <main className="admin-page flex min-h-screen items-center justify-center bg-black px-6 py-24 text-white">
+        <div className="rounded-2xl border border-white/10 bg-white/5 px-6 py-4 text-sm text-white/60">
+          Checking admin session...
         </div>
       </main>
     );
   }
+
+  if (sessionState === "guest") return null;
 
   return (
     <main className="admin-page min-h-screen bg-black px-6 py-8 text-white">
@@ -453,7 +520,7 @@ function AdminRoute() {
               className="pill"
               onClick={async () => {
                 await requestJson("/api/admin/logout");
-                setAuthed(false);
+                await navigate({ to: "/admin/login", replace: true });
               }}
             >
               Logout

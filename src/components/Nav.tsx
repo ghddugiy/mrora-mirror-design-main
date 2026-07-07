@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router";
 import mroraLogo from "@/assets/mrora-logo.png";
 import { useSiteContent } from "@/lib/site-content-context";
 
@@ -34,9 +33,6 @@ export function Nav() {
         >
           Contact
         </button>
-        <Link to="/admin" className="px-4 py-1.5 rounded-full text-white/80 hover:text-black hover:bg-[color:var(--lime)] transition-colors">
-          Admin
-        </Link>
       </nav>
       <button
         onClick={() => setContactOpen(true)}
@@ -48,4 +44,3 @@ export function Nav() {
     </header>
   );
 }
-

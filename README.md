@@ -18,9 +18,8 @@ npm install
 ### 3. Local Configuration
 Create or update your `.env.local` file in the project root:
 ```env
-# Resend API Configuration
-RESEND_API_KEY="your_resend_api_key"
-CONTACT_EMAIL="mroraaii11@gmail.com"
+# Web3Forms API Configuration
+WEB3FORMS_ACCESS_KEY="26a462fa-b7a2-4f0c-ab05-18aa71803ff2"
 ```
 
 ### 4. Running Locally
@@ -32,21 +31,15 @@ Open **[http://localhost:8081](http://localhost:8081)** to preview the site.
 
 ---
 
-## Email Integration (Resend API)
+## Email Integration (Web3Forms API)
 
-The contact form dispatches visitor inquiries directly to your inbox using **Resend**.
+The contact form dispatches visitor inquiries directly to your inbox using **Web3Forms** through a secure server-side API proxy.
 
-### 1. Generating a Resend API Key
-1. Sign up or log in at **[Resend.com](https://resend.com/)**.
-2. Go to your Dashboard and select **API Keys** from the sidebar.
-3. Click **Create API Key**, name it `Mrora Website`, select `Sending Access`, and click **Create**.
-4. Copy the generated key (e.g. `re_...`) and place it as `RESEND_API_KEY` in your `.env.local` or Vercel settings.
-
-### 2. Custom Domain Verification (Optional)
-By default, emails send via Resend's testing sandbox `onboarding@resend.dev` and can only deliver to the email address associated with your Resend account. To send emails from a custom domain (e.g. `hello@mrora.com` to any recipient):
-1. Navigate to **Domains** in the Resend dashboard.
-2. Click **Add Domain**, enter your domain name, and configure the suggested DNS records (MX, SPF, DKIM) on your registrar.
-3. Once verified, update the `from` field in `src/server.ts` to your verified address.
+### 1. Create a Free Web3Forms Account & Access Key
+1. Visit **[Web3Forms.com](https://web3forms.com/)**.
+2. Enter your email address in the registration box to register and receive your Access Key.
+3. Check your inbox; Web3Forms will email you a unique Access Key (e.g. `26a462fa-b7a2-4f0c-ab05-18aa71803ff2`).
+4. Place this Access Key inside your `.env.local` file as `WEB3FORMS_ACCESS_KEY`.
 
 ---
 
@@ -55,7 +48,7 @@ By default, emails send via Resend's testing sandbox `onboarding@resend.dev` and
 1. Push your repository commits to GitHub.
 2. Link the repository to your Vercel Dashboard.
 3. Go to **Settings → Environment Variables** in your Vercel project dashboard.
-4. Add the following keys:
-   - `RESEND_API_KEY`: Your production Resend API key.
-   - `CONTACT_EMAIL`: The recipient email address (e.g. `mroraaii11@gmail.com`).
-5. Redeploy your project.
+4. Remove any legacy `SMTP_*` or `RESEND_API_KEY` / `CONTACT_EMAIL` environment variables.
+5. Add the following new variable to **Production, Preview, and Development** environments:
+   - **`WEB3FORMS_ACCESS_KEY`**: `26a462fa-b7a2-4f0c-ab05-18aa71803ff2` (or your custom Access Key).
+6. Trigger a production redeployment to inject the new settings.

@@ -31,6 +31,37 @@ export function ContactDialog() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Prevent duplicate submissions
+    if (sending) return;
+
+    // Client-side validations
+    if (!formData.name.trim()) {
+      setError("Name is required.");
+      return;
+    }
+    if (!formData.email.trim()) {
+      setError("Email address is required.");
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email.trim())) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (!formData.phone.trim()) {
+      setError("Phone number is required.");
+      return;
+    }
+    if (!formData.service) {
+      setError("Please select a service.");
+      return;
+    }
+    if (!formData.message.trim()) {
+      setError("Project details are required.");
+      return;
+    }
+
     setSending(true);
     setError(null);
 
@@ -45,8 +76,17 @@ export function ContactDialog() {
 
       const data = await response.json().catch(() => null);
       if (response.ok && data?.ok) {
-        setRecipient(data.recipient || "mroraaii1@gmail.com");
+        // Resolve recipient dynamically
+        setRecipient(data.recipient && data.recipient.includes("@") ? data.recipient : (content?.contact?.email || "mroraai11@gmail.com"));
         setSubmitted(true);
+        // Reset the form after a successful submission
+        setFormData({
+          name: "",
+          phone: "",
+          email: "",
+          service: "",
+          message: "",
+        });
       } else {
         throw new Error(data?.error || "Failed to send inquiry.");
       }

@@ -7,13 +7,11 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { deleteUpload, readContent, validateContent, writeContent, writeUpload } from "./lib/content-store";
 import { DEFAULT_SITE_CONTENT } from "./lib/site-content-data";
-import { Resend } from "resend";
-
-// Validate Resend environment variables on startup
-const REQUIRED_RESEND_VARS = ["RESEND_API_KEY", "CONTACT_EMAIL"];
-const missingResendVarsOnStart = REQUIRED_RESEND_VARS.filter((varName) => !process.env[varName]);
-if (missingResendVarsOnStart.length > 0) {
-  console.warn(`[RESEND CONFIGURATION WARNING] The following environment variables are missing for contact form functionality: ${missingResendVarsOnStart.join(", ")}`);
+// Validate Web3Forms environment variables on startup
+const REQUIRED_WEB3FORMS_VARS = ["WEB3FORMS_ACCESS_KEY"];
+const missingWeb3FormsVarsOnStart = REQUIRED_WEB3FORMS_VARS.filter((varName) => !process.env[varName]);
+if (missingWeb3FormsVarsOnStart.length > 0) {
+  console.warn(`[WEB3FORMS CONFIGURATION WARNING] The following environment variables are missing for contact form functionality: ${missingWeb3FormsVarsOnStart.join(", ")}`);
 }
 
 type ServerEntry = {
@@ -75,10 +73,10 @@ async function handleApi(request: Request): Promise<Response | undefined> {
     }
 
     // Check environment variables at runtime
-    const requiredVars = ["RESEND_API_KEY", "CONTACT_EMAIL"];
+    const requiredVars = ["WEB3FORMS_ACCESS_KEY"];
     const missingVars = requiredVars.filter((varName) => !process.env[varName]);
     if (missingVars.length > 0) {
-      const errorMsg = `Resend email service is misconfigured. Missing environment variables: ${missingVars.join(", ")}`;
+      const errorMsg = `Web3Forms email service is misconfigured. Missing environment variables: ${missingVars.join(", ")}`;
       console.error(`[Configuration Error] ${errorMsg}`);
       return json(
         { ok: false, error: errorMsg },
@@ -86,96 +84,40 @@ async function handleApi(request: Request): Promise<Response | undefined> {
       );
     }
 
-    const resendApiKey = process.env.RESEND_API_KEY!;
-    const contactEmail = process.env.CONTACT_EMAIL!;
+    const accessKey = process.env.WEB3FORMS_ACCESS_KEY!;
 
-    console.log(`[Resend Info] Initializing Resend API client`);
-    console.log(`[Resend Info] Target recipient email: ${contactEmail}`);
+    console.log(`[Web3Forms Info] Forwarding submission to Web3Forms API...`);
 
     try {
-      const resend = new Resend(resendApiKey);
-
-      const formattedDate = new Date().toLocaleString("en-US", {
-        timeZone: "Asia/Kolkata",
-        dateStyle: "full",
-        timeStyle: "long",
+      const response = await fetch("https://api.web3forms.com/submit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          access_key: accessKey,
+          name: body.name,
+          email: body.email,
+          phone: body.phone || "N/A",
+          subject: `Mrora Inquiry: ${body.service} from ${body.name}`,
+          from_name: "Mrora Website",
+          replyto: body.email,
+          message: `Selected Service: ${body.service}\n\nProject Details:\n${body.message}`
+        })
       });
 
-      const mailOptions = {
-        from: `Mrora Website <onboarding@resend.dev>`,
-        to: contactEmail,
-        replyTo: body.email,
-        subject: `Mrora Inquiry: ${body.service} from ${body.name}`,
-        text: `New Project Inquiry from Mrora Website\n\n` +
-              `Name: ${body.name}\n` +
-              `Email: ${body.email}\n` +
-              `Phone: ${body.phone || "N/A"}\n` +
-              `Service: ${body.service}\n` +
-              `Date & Time: ${formattedDate}\n\n` +
-              `Message:\n${body.message}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; background-color: #0c0c0c; color: #ffffff; border: 1px solid #1a1a1a; border-radius: 16px;">
-            <h2 style="color: #c6ff3d; font-size: 24px; margin-top: 0; margin-bottom: 20px; font-weight: 800; text-transform: uppercase; border-bottom: 1px solid #222222; padding-bottom: 15px;">
-              New Project Inquiry
-            </h2>
-            
-            <div style="background-color: #121212; padding: 20px; border-radius: 12px; border: 1px solid #222222; margin-bottom: 25px;">
-              <table style="width: 100%; border-collapse: collapse;">
-                <tr>
-                  <td style="padding: 8px 0; font-size: 14px; color: #888888; width: 30%;">Full Name</td>
-                  <td style="padding: 8px 0; font-size: 14px; color: #ffffff; font-weight: bold;">${body.name}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; font-size: 14px; color: #888888;">Email Address</td>
-                  <td style="padding: 8px 0; font-size: 14px; color: #c6ff3d; font-weight: bold;"><a href="mailto:${body.email}" style="color: #c6ff3d; text-decoration: none;">${body.email}</a></td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; font-size: 14px; color: #888888;">Phone Number</td>
-                  <td style="padding: 8px 0; font-size: 14px; color: #ffffff;">${body.phone || "N/A"}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; font-size: 14px; color: #888888;">Selected Service</td>
-                  <td style="padding: 8px 0; font-size: 14px; color: #ffffff;"><span style="background-color: #c6ff3d; color: #000000; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: bold;">${body.service}</span></td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; font-size: 14px; color: #888888;">Date & Time</td>
-                  <td style="padding: 8px 0; font-size: 14px; color: #ffffff;">${formattedDate}</td>
-                </tr>
-              </table>
-            </div>
+      const data = await response.json().catch(() => null);
 
-            <div style="margin-bottom: 10px;">
-              <h3 style="color: #ffffff; font-size: 16px; margin-top: 0; margin-bottom: 10px; font-weight: 700;">Project details & message</h3>
-              <div style="background-color: #121212; padding: 20px; border-radius: 12px; border: 1px solid #222222; font-size: 14px; line-height: 1.6; color: #dddddd; white-space: pre-wrap;">${body.message}</div>
-            </div>
-
-            <p style="font-size: 11px; color: #555555; text-align: center; margin-top: 30px; border-top: 1px solid #222222; padding-top: 15px; margin-bottom: 0;">
-              This inquiry was securely delivered directly from your website contact form via Resend.
-            </p>
-          </div>
-        `
-      };
-
-      console.log("Resend email payload configuration:", {
-        from: mailOptions.from,
-        to: mailOptions.to,
-        replyTo: mailOptions.replyTo,
-        subject: mailOptions.subject,
-        textLength: mailOptions.text.length,
-        htmlLength: mailOptions.html.length,
-      });
-
-      const { data, error } = await resend.emails.send(mailOptions);
-
-      if (error) {
-        throw error;
+      if (response.ok && data?.success) {
+        console.log(`[Web3Forms Info] Submission succeeded. Message: ${data.message}`);
+        return json({ ok: true, recipient: "configured Web3Forms inbox" }, { headers: corsCredentialsHeaders(request) });
+      } else {
+        throw new Error(data?.message || "Failed to submit to Web3Forms API.");
       }
-
-      console.log(`[Resend Info] Email successfully sent to recipient: ${contactEmail}. Resend ID: ${data?.id}`);
-      return json({ ok: true, recipient: contactEmail }, { headers: corsCredentialsHeaders(request) });
     } catch (error: any) {
-      const dispatchErrorMsg = `Resend API Dispatch Failed: ${error?.message || error}`;
-      console.error(`[Resend Dispatch Error] ${dispatchErrorMsg}`, error);
+      const dispatchErrorMsg = `Web3Forms Dispatch Failed: ${error?.message || error}`;
+      console.error(`[Web3Forms Dispatch Error] ${dispatchErrorMsg}`, error);
       return json(
         { ok: false, error: dispatchErrorMsg },
         { status: 500, headers: corsCredentialsHeaders(request) }

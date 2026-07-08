@@ -100,7 +100,7 @@ export const DEFAULT_SITE_CONTENT: SiteContent = {
     { question: "Do you provide ongoing support?", answer: "Yes. We can continue with content updates, performance checks, and feature work." },
   ],
   contact: {
-    email: typeof process !== "undefined" && process.env?.CONTACT_EMAIL || "mroraai11@gmail.com",
+    email: typeof process !== "undefined" && process.env?.CONTACT_EMAIL || "mroraaii11@gmail.com",
     phone: "+91 9980866080",
     address: "Bangalore, India",
     ctaLabel: "Let's Talk",

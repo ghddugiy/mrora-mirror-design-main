@@ -7,13 +7,13 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { deleteUpload, readContent, validateContent, writeContent, writeUpload } from "./lib/content-store";
 import { DEFAULT_SITE_CONTENT } from "./lib/site-content-data";
-import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
-// Validate SMTP environment variables on startup
-const REQUIRED_SMTP_VARS = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "CONTACT_EMAIL"];
-const missingSmtpVarsOnStart = REQUIRED_SMTP_VARS.filter((varName) => !process.env[varName]);
-if (missingSmtpVarsOnStart.length > 0) {
-  console.error(`[SMTP CONFIGURATION WARNING] The following required environment variables are missing for contact form functionality: ${missingSmtpVarsOnStart.join(", ")}`);
+// Validate Resend environment variables on startup
+const REQUIRED_RESEND_VARS = ["RESEND_API_KEY", "CONTACT_EMAIL"];
+const missingResendVarsOnStart = REQUIRED_RESEND_VARS.filter((varName) => !process.env[varName]);
+if (missingResendVarsOnStart.length > 0) {
+  console.warn(`[RESEND CONFIGURATION WARNING] The following environment variables are missing for contact form functionality: ${missingResendVarsOnStart.join(", ")}`);
 }
 
 type ServerEntry = {
@@ -74,11 +74,11 @@ async function handleApi(request: Request): Promise<Response | undefined> {
       return json({ ok: false, error: "Missing required fields (name, email, service, and message are required)" }, { status: 400, headers: corsCredentialsHeaders(request) });
     }
 
-    // Check environment variables at runtime to print missing ones specifically
-    const requiredVars = ["SMTP_HOST", "SMTP_PORT", "SMTP_SECURE", "SMTP_USER", "SMTP_PASS", "CONTACT_EMAIL"];
+    // Check environment variables at runtime
+    const requiredVars = ["RESEND_API_KEY", "CONTACT_EMAIL"];
     const missingVars = requiredVars.filter((varName) => !process.env[varName]);
     if (missingVars.length > 0) {
-      const errorMsg = `SMTP email service is misconfigured. Missing environment variables: ${missingVars.join(", ")}`;
+      const errorMsg = `Resend email service is misconfigured. Missing environment variables: ${missingVars.join(", ")}`;
       console.error(`[Configuration Error] ${errorMsg}`);
       return json(
         { ok: false, error: errorMsg },
@@ -86,53 +86,32 @@ async function handleApi(request: Request): Promise<Response | undefined> {
       );
     }
 
-    const smtpHost = process.env.SMTP_HOST!;
-    const smtpPort = parseInt(process.env.SMTP_PORT!, 10);
-    const smtpSecure = process.env.SMTP_SECURE === "true"; // true for port 465, false for port 587
-    const smtpUser = process.env.SMTP_USER!;
-    const smtpPass = process.env.SMTP_PASS!;
+    const resendApiKey = process.env.RESEND_API_KEY!;
     const contactEmail = process.env.CONTACT_EMAIL!;
 
-    console.log(`[SMTP Info] Attempting to initialize SMTP transporter for user: ${smtpUser} via host: ${smtpHost}:${smtpPort} (Secure: ${smtpSecure})`);
-    console.log(`[SMTP Info] Target email address (process.env.CONTACT_EMAIL): ${contactEmail}`);
+    console.log(`[Resend Info] Initializing Resend API client`);
+    console.log(`[Resend Info] Target recipient email: ${contactEmail}`);
 
     try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpSecure,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
+      const resend = new Resend(resendApiKey);
+
+      const formattedDate = new Date().toLocaleString("en-US", {
+        timeZone: "Asia/Kolkata",
+        dateStyle: "full",
+        timeStyle: "long",
       });
 
-      // Test SMTP connection using transporter.verify()
-      try {
-        await transporter.verify();
-        console.log("[SMTP Info] SMTP connection verification succeeded!");
-      } catch (verifyError: any) {
-        let verifyErrorMsg = `SMTP Connection Verification Failed: ${verifyError.message || verifyError}`;
-        if (verifyError.code === 'EAUTH' || verifyError.message?.includes('Username and Password not accepted') || verifyError.responseCode === 535) {
-          verifyErrorMsg = `SMTP Authentication Failed: Please check your SMTP_USER (${smtpUser}) and SMTP_PASS (Google App Password) environment variables. Error details: ${verifyError.message}`;
-        }
-        console.error(`[SMTP Connection Error] ${verifyErrorMsg}`, verifyError);
-        return json(
-          { ok: false, error: verifyErrorMsg },
-          { status: 500, headers: corsCredentialsHeaders(request) }
-        );
-      }
-
       const mailOptions = {
-        from: `"${body.name} (via Website)" <${smtpUser}>`, // SMTP mail servers usually require the "from" address to be the authenticated user
-        replyTo: body.email, // Allows replying directly to the inquirer's email
-        to: contactEmail, // Recipient as specified in environment variables
+        from: `Mrora Website <onboarding@resend.dev>`,
+        to: contactEmail,
+        replyTo: body.email,
         subject: `Mrora Inquiry: ${body.service} from ${body.name}`,
         text: `New Project Inquiry from Mrora Website\n\n` +
               `Name: ${body.name}\n` +
               `Email: ${body.email}\n` +
               `Phone: ${body.phone || "N/A"}\n` +
-              `Service: ${body.service}\n\n` +
+              `Service: ${body.service}\n` +
+              `Date & Time: ${formattedDate}\n\n` +
               `Message:\n${body.message}`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 25px; background-color: #0c0c0c; color: #ffffff; border: 1px solid #1a1a1a; border-radius: 16px;">
@@ -158,6 +137,10 @@ async function handleApi(request: Request): Promise<Response | undefined> {
                   <td style="padding: 8px 0; font-size: 14px; color: #888888;">Selected Service</td>
                   <td style="padding: 8px 0; font-size: 14px; color: #ffffff;"><span style="background-color: #c6ff3d; color: #000000; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: bold;">${body.service}</span></td>
                 </tr>
+                <tr>
+                  <td style="padding: 8px 0; font-size: 14px; color: #888888;">Date & Time</td>
+                  <td style="padding: 8px 0; font-size: 14px; color: #ffffff;">${formattedDate}</td>
+                </tr>
               </table>
             </div>
 
@@ -167,13 +150,13 @@ async function handleApi(request: Request): Promise<Response | undefined> {
             </div>
 
             <p style="font-size: 11px; color: #555555; text-align: center; margin-top: 30px; border-top: 1px solid #222222; padding-top: 15px; margin-bottom: 0;">
-              This inquiry was securely delivered directly from your website contact form.
+              This inquiry was securely delivered directly from your website contact form via Resend.
             </p>
           </div>
         `
       };
 
-      console.log("Nodemailer sendMail() configuration:", {
+      console.log("Resend email payload configuration:", {
         from: mailOptions.from,
         to: mailOptions.to,
         replyTo: mailOptions.replyTo,
@@ -182,17 +165,17 @@ async function handleApi(request: Request): Promise<Response | undefined> {
         htmlLength: mailOptions.html.length,
       });
 
-      await transporter.sendMail(mailOptions);
-      console.log(`[SMTP Info] Email successfully sent to recipient: ${contactEmail}`);
+      const { data, error } = await resend.emails.send(mailOptions);
+
+      if (error) {
+        throw error;
+      }
+
+      console.log(`[Resend Info] Email successfully sent to recipient: ${contactEmail}. Resend ID: ${data?.id}`);
       return json({ ok: true, recipient: contactEmail }, { headers: corsCredentialsHeaders(request) });
     } catch (error: any) {
-      let dispatchErrorMsg = `Nodemailer SMTP Dispatch Failed: ${error?.message || error}`;
-      if (error.code === 'EENVELOPE' || error.message?.includes('recipient') || error.responseCode === 550) {
-        dispatchErrorMsg = `Invalid Recipient Email Address: The recipient address ${contactEmail} was rejected by the mail server. Please ensure CONTACT_EMAIL is a valid email. Error details: ${error.message}`;
-      } else if (error.code === 'EAUTH' || error.responseCode === 535) {
-        dispatchErrorMsg = `SMTP Authentication Failed: Please check your SMTP credentials. Error details: ${error.message}`;
-      }
-      console.error(`[SMTP Dispatch Error] ${dispatchErrorMsg}`, error);
+      const dispatchErrorMsg = `Resend API Dispatch Failed: ${error?.message || error}`;
+      console.error(`[Resend Dispatch Error] ${dispatchErrorMsg}`, error);
       return json(
         { ok: false, error: dispatchErrorMsg },
         { status: 500, headers: corsCredentialsHeaders(request) }

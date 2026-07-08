@@ -108,12 +108,15 @@ async function handleApi(request: Request): Promise<Response | undefined> {
       });
 
       const data = await response.json().catch(() => null);
+      console.log(`[Web3Forms Debug] Response Status: ${response.status} ${response.statusText}`);
+      console.log(`[Web3Forms Debug] Response Body:`, JSON.stringify(data));
 
       if (response.ok && data?.success) {
         console.log(`[Web3Forms Info] Submission succeeded. Message: ${data.message}`);
         return json({ ok: true, recipient: "configured Web3Forms inbox" }, { headers: corsCredentialsHeaders(request) });
       } else {
-        throw new Error(data?.message || "Failed to submit to Web3Forms API.");
+        const errorDetail = data?.message || `API returned status ${response.status} ${response.statusText}`;
+        throw new Error(errorDetail);
       }
     } catch (error: any) {
       const dispatchErrorMsg = `Web3Forms Dispatch Failed: ${error?.message || error}`;

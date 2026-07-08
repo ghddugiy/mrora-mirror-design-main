@@ -57,26 +57,11 @@ function isAuthed(request: Request) {
 async function handleApi(request: Request): Promise<Response | undefined> {
   const url = new URL(request.url);
   
-  if (url.pathname === "/api/contact" && request.method === "POST") {
-    const body = await request.json().catch(() => null) as {
-      name?: string;
-      phone?: string;
-      email?: string;
-      service?: string;
-      message?: string;
-    } | null;
-
-    // Validate required fields
-    if (!body?.name || !body?.email || !body?.message || !body?.service) {
-      console.error("[Validation Error] Missing fields in inquiry request body:", body);
-      return json({ ok: false, error: "Missing required fields (name, email, service, and message are required)" }, { status: 400, headers: corsCredentialsHeaders(request) });
-    }
-
+  if (url.pathname === "/api/contact/key" && request.method === "GET") {
     // Check environment variables at runtime
-    const requiredVars = ["WEB3FORMS_ACCESS_KEY"];
-    const missingVars = requiredVars.filter((varName) => !process.env[varName]);
-    if (missingVars.length > 0) {
-      const errorMsg = `Web3Forms email service is misconfigured. Missing environment variables: ${missingVars.join(", ")}`;
+    const accessKey = process.env.WEB3FORMS_ACCESS_KEY;
+    if (!accessKey) {
+      const errorMsg = `Web3Forms email service is misconfigured. Missing WEB3FORMS_ACCESS_KEY environment variable.`;
       console.error(`[Configuration Error] ${errorMsg}`);
       return json(
         { ok: false, error: errorMsg },
@@ -84,48 +69,7 @@ async function handleApi(request: Request): Promise<Response | undefined> {
       );
     }
 
-    const accessKey = process.env.WEB3FORMS_ACCESS_KEY!;
-
-    console.log(`[Web3Forms Info] Forwarding submission to Web3Forms API...`);
-
-    try {
-      const response = await fetch("https://api.web3forms.com/submit", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json"
-        },
-        body: JSON.stringify({
-          access_key: accessKey,
-          name: body.name,
-          email: body.email,
-          phone: body.phone || "N/A",
-          subject: `Mrora Inquiry: ${body.service} from ${body.name}`,
-          from_name: "Mrora Website",
-          replyto: body.email,
-          message: `Selected Service: ${body.service}\n\nProject Details:\n${body.message}`
-        })
-      });
-
-      const data = await response.json().catch(() => null);
-      console.log(`[Web3Forms Debug] Response Status: ${response.status} ${response.statusText}`);
-      console.log(`[Web3Forms Debug] Response Body:`, JSON.stringify(data));
-
-      if (response.ok && data?.success) {
-        console.log(`[Web3Forms Info] Submission succeeded. Message: ${data.message}`);
-        return json({ ok: true, recipient: "configured Web3Forms inbox" }, { headers: corsCredentialsHeaders(request) });
-      } else {
-        const errorDetail = data?.message || `API returned status ${response.status} ${response.statusText}`;
-        throw new Error(errorDetail);
-      }
-    } catch (error: any) {
-      const dispatchErrorMsg = `Web3Forms Dispatch Failed: ${error?.message || error}`;
-      console.error(`[Web3Forms Dispatch Error] ${dispatchErrorMsg}`, error);
-      return json(
-        { ok: false, error: dispatchErrorMsg },
-        { status: 500, headers: corsCredentialsHeaders(request) }
-      );
-    }
+    return json({ ok: true, key: accessKey }, { headers: corsCredentialsHeaders(request) });
   }
 
   if (url.pathname === "/api/content" && request.method === "GET") {
